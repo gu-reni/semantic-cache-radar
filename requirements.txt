@@ -1,0 +1,24 @@
+# FastAPI 网关与技术雷达查询 API。
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.32,<1.0
+
+# 读取 .env 环境变量。
+pydantic-settings>=2.6,<3.0
+python-dotenv>=1.0,<2.0
+
+# 调用 OpenAI 兼容的大模型接口。
+openai>=1.55,<2.0
+
+# 本地 Embedding 与嵌入式向量数据库。
+sentence-transformers>=3.3,<4.0
+chromadb>=0.5,<1.0
+
+# 技术雷达的数据抓取、HTML 解析与定时任务。
+httpx>=0.27,<1.0
+beautifulsoup4>=4.12,<5.0
+APScheduler>=3.10,<4.0
+
+# 自动化测试与代码质量检查。
+pytest>=8.3,<9.0
+pytest-asyncio>=0.24,<1.0
+ruff>=0.8,<1.0
