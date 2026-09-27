@@ -27,3 +27,29 @@
 - [ ] 语义缓存网关
 - [ ] AI 技术雷达
 - [ ] Docker Compose 部署
+
+## 本地单次雷达任务
+
+启动网关后，可运行一次技术雷达任务：
+
+```powershell
+python -m radar.app.runner --once
+```
+
+雷达查询 API：
+
+```text
+GET /radar/items
+GET /radar/items?source=hackernews
+GET /radar/items?keyword=Python
+```
+
+## Docker Compose
+
+复制 `.env.example` 为 `.env` 并填写模型 API Key 后，使用：
+
+```bash
+docker compose up -d --build
+```
+
+网关运行在 `8000`，雷达查询 API 运行在 `8001`。

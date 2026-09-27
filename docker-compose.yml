@@ -1,0 +1,33 @@
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: uvicorn gateway.app.main:app --host 0.0.0.0 --port 8000
+    env_file:
+      - .env
+    environment:
+      VECTOR_STORE_PATH: /app/data/chroma
+      EMBEDDING_MODEL_PATH: /app/models/multilingual-e5-small
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models:ro
+    restart: unless-stopped
+
+  radar:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: uvicorn radar.app.main:app --host 0.0.0.0 --port 8001
+    environment:
+      GATEWAY_BASE_URL: http://gateway:8000
+      RADAR_DATABASE_PATH: /app/data/radar.db
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - gateway
+    restart: unless-stopped
