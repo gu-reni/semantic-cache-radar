@@ -46,6 +46,36 @@ class HackerNewsCollector:
         return [item for item in results if item is not None]
 
 
+class V2EXCollector:
+    """Collect recent topics from the public V2EX topics API."""
+
+    def __init__(self, client: httpx.AsyncClient, topic_limit: int = 10) -> None:
+        self._client = client
+        self._topic_limit = topic_limit
+
+    async def fetch(self) -> list[RadarItem]:
+        response = await self._client.get("https://www.v2ex.com/api/topics/latest.json")
+        response.raise_for_status()
+        topics = response.json()[: self._topic_limit]
+
+        items: list[RadarItem] = []
+        for topic in topics:
+            topic_id = topic.get("id")
+            title = topic.get("title")
+            if topic_id is None or not title:
+                continue
+            items.append(
+                RadarItem(
+                    source="v2ex",
+                    external_id=str(topic_id),
+                    title=str(title),
+                    url=str(topic.get("url") or f"https://www.v2ex.com/t/{topic_id}"),
+                    published_at=str(topic.get("created")) if topic.get("created") else None,
+                )
+            )
+        return items
+
+
 async def _gather_limited(
     values: list[int],
     function: Callable[[int], Awaitable[RadarItem | None]],
