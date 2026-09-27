@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from gateway.app.cache_service import SemanticCache
+from gateway.app.cache_service import GeneratedAnswer, SemanticCache
 from gateway.app.vector_store import VectorStore
 
 
@@ -21,10 +21,10 @@ async def test_second_similar_question_hits_cache(tmp_path: Path) -> None:
     cache = SemanticCache(FakeEmbeddingService(), store, similarity_threshold=0.92)
     calls = 0
 
-    async def generate_answer() -> str:
+    async def generate_answer() -> GeneratedAnswer:
         nonlocal calls
         calls += 1
-        return "generated answer"
+        return GeneratedAnswer("generated answer", {"total_tokens": 8})
 
     first = await cache.get_or_create("first question", generate_answer)
     second = await cache.get_or_create("first question", generate_answer)
@@ -41,10 +41,10 @@ async def test_low_similarity_does_not_hit_cache(tmp_path: Path) -> None:
     cache = SemanticCache(FakeEmbeddingService(), store, similarity_threshold=0.92)
     calls = 0
 
-    async def generate_answer() -> str:
+    async def generate_answer() -> GeneratedAnswer:
         nonlocal calls
         calls += 1
-        return f"answer {calls}"
+        return GeneratedAnswer(f"answer {calls}", {"total_tokens": 8})
 
     await cache.get_or_create("first question", generate_answer)
     result = await cache.get_or_create("different question", generate_answer)
@@ -66,10 +66,10 @@ async def test_expired_entry_does_not_hit_cache(tmp_path: Path) -> None:
     )
     calls = 0
 
-    async def generate_answer() -> str:
+    async def generate_answer() -> GeneratedAnswer:
         nonlocal calls
         calls += 1
-        return f"answer {calls}"
+        return GeneratedAnswer(f"answer {calls}", {"total_tokens": 8})
 
     await cache.get_or_create("first question", generate_answer)
     current_time = current_time + timedelta(seconds=61)

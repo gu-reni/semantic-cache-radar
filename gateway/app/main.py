@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, Response
 
-from gateway.app.cache_service import SemanticCache
+from gateway.app.cache_service import GeneratedAnswer, SemanticCache
 from gateway.app.config import get_settings
 from gateway.app.embeddings import EmbeddingService
 from gateway.app.llm_client import LLMClient
@@ -48,6 +48,10 @@ async def cache_stats(
         "misses": stats.misses,
         "hit_rate": stats.hit_rate,
         "stored_entries": stats.stored_entries,
+        "prompt_tokens": stats.prompt_tokens,
+        "completion_tokens": stats.completion_tokens,
+        "total_tokens": stats.total_tokens,
+        "saved_tokens": stats.saved_tokens,
     }
 
 
@@ -83,9 +87,10 @@ async def create_chat_completion(
     """Serve a cached answer or forward the request to the configured upstream."""
     upstream_request = request.model_dump(exclude_none=True)
 
-    async def generate_answer() -> str:
+    async def generate_answer() -> GeneratedAnswer:
         completion = await client.chat_completion(upstream_request)
-        return _answer_from_completion(completion)
+        usage = completion.get("usage") or {}
+        return GeneratedAnswer(answer=_answer_from_completion(completion), usage=usage)
 
     result = await cache.get_or_create(
         question=_cache_question(request),
@@ -107,9 +112,5 @@ async def create_chat_completion(
                 "finish_reason": "stop",
             }
         ],
-        "usage": {
-            "prompt_tokens": 0 if result.hit else None,
-            "completion_tokens": 0 if result.hit else None,
-            "total_tokens": 0 if result.hit else None,
-        },
+        "usage": result.usage or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
     }

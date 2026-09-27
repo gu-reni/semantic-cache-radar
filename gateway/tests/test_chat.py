@@ -3,7 +3,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from gateway.app.config import Settings
-from gateway.app.cache_service import CacheResult
+from gateway.app.cache_service import CacheResult, GeneratedAnswer
 from gateway.app.llm_client import LLMClient
 from gateway.app.main import app, get_llm_client, get_semantic_cache
 
@@ -41,9 +41,16 @@ class FakeSemanticCache:
 
     async def get_or_create(self, question: str, generate_answer: Any, metadata: Any) -> CacheResult:
         if self.hit:
-            return CacheResult(answer="cached answer", hit=True, similarity=0.97, cache_id="cache-test")
-        answer = await generate_answer()
-        return CacheResult(answer=answer, hit=False, cache_id="cache-test")
+            return CacheResult(
+                answer="cached answer",
+                hit=True,
+                similarity=0.97,
+                cache_id="cache-test",
+                usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            )
+        generated = await generate_answer()
+        assert isinstance(generated, GeneratedAnswer)
+        return CacheResult(answer=generated.answer, hit=False, cache_id="cache-test", usage=generated.usage)
 
 
 def test_chat_completion_forwards_request() -> None:
@@ -65,6 +72,7 @@ def test_chat_completion_forwards_request() -> None:
     assert response.status_code == 200
     assert response.headers["X-Cache"] == "MISS"
     assert response.json()["choices"][0]["message"]["content"] == "test answer"
+    assert response.json()["usage"] == {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}
     assert fake_client.received == {
         "messages": [{"role": "user", "content": "hello"}],
     }

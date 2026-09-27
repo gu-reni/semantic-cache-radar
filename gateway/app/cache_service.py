@@ -13,6 +13,14 @@ class CacheResult:
     hit: bool
     similarity: float | None = None
     cache_id: str | None = None
+    usage: dict[str, int] | None = None
+    saved_tokens: int = 0
+
+
+@dataclass(frozen=True)
+class GeneratedAnswer:
+    answer: str
+    usage: dict[str, int]
 
 
 @dataclass(frozen=True)
@@ -21,6 +29,10 @@ class CacheStats:
     hits: int
     misses: int
     stored_entries: int
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    saved_tokens: int
 
     @property
     def hit_rate(self) -> float:
@@ -46,11 +58,15 @@ class SemanticCache:
         self._requests = 0
         self._hits = 0
         self._misses = 0
+        self._prompt_tokens = 0
+        self._completion_tokens = 0
+        self._total_tokens = 0
+        self._saved_tokens = 0
 
     async def get_or_create(
         self,
         question: str,
-        generate_answer: Callable[[], Awaitable[str]],
+        generate_answer: Callable[[], Awaitable[GeneratedAnswer]],
         metadata: dict[str, Any] | None = None,
     ) -> CacheResult:
         self._requests += 1
@@ -61,28 +77,41 @@ class SemanticCache:
         for match in matches:
             if self._is_valid_match(match, now):
                 self._hits += 1
+                saved_tokens = int(match.metadata.get("total_tokens", 0))
+                self._saved_tokens += saved_tokens
                 return CacheResult(
                     answer=match.answer,
                     hit=True,
                     similarity=match.similarity,
                     cache_id=match.cache_id,
+                    usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                    saved_tokens=saved_tokens,
                 )
 
         self._misses += 1
-        answer = await generate_answer()
+        generated = await generate_answer()
+        usage = {
+            "prompt_tokens": int(generated.usage.get("prompt_tokens", 0)),
+            "completion_tokens": int(generated.usage.get("completion_tokens", 0)),
+            "total_tokens": int(generated.usage.get("total_tokens", 0)),
+        }
+        self._prompt_tokens += usage["prompt_tokens"]
+        self._completion_tokens += usage["completion_tokens"]
+        self._total_tokens += usage["total_tokens"]
         expires_at = now + timedelta(seconds=self._ttl_seconds)
         entry_metadata = {
             **(metadata or {}),
             "expires_at": expires_at.isoformat(),
+            **usage,
         }
         passage_embedding = self._embedding_service.encode_passage(question)
         cache_id = self._vector_store.add(
             question=question,
-            answer=answer,
+            answer=generated.answer,
             embedding=passage_embedding,
             metadata=entry_metadata,
         )
-        return CacheResult(answer=answer, hit=False, cache_id=cache_id)
+        return CacheResult(answer=generated.answer, hit=False, cache_id=cache_id, usage=usage)
 
     def stats(self) -> CacheStats:
         return CacheStats(
@@ -90,6 +119,10 @@ class SemanticCache:
             hits=self._hits,
             misses=self._misses,
             stored_entries=self._vector_store.count(),
+            prompt_tokens=self._prompt_tokens,
+            completion_tokens=self._completion_tokens,
+            total_tokens=self._total_tokens,
+            saved_tokens=self._saved_tokens,
         )
 
     def clear(self) -> None:
@@ -97,6 +130,10 @@ class SemanticCache:
         self._requests = 0
         self._hits = 0
         self._misses = 0
+        self._prompt_tokens = 0
+        self._completion_tokens = 0
+        self._total_tokens = 0
+        self._saved_tokens = 0
 
     def _is_valid_match(self, match: VectorMatch, now: datetime) -> bool:
         if match.similarity < self._similarity_threshold:
