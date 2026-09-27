@@ -3,6 +3,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
+from bs4 import BeautifulSoup
 
 from radar.app.models import RadarItem
 
@@ -71,6 +72,46 @@ class V2EXCollector:
                     title=str(title),
                     url=str(topic.get("url") or f"https://www.v2ex.com/t/{topic_id}"),
                     published_at=str(topic.get("created")) if topic.get("created") else None,
+                )
+            )
+        return items
+
+
+class GitHubTrendingCollector:
+    """Parse repository cards from GitHub's public Trending page."""
+
+    def __init__(self, client: httpx.AsyncClient, repository_limit: int = 10) -> None:
+        self._client = client
+        self._repository_limit = repository_limit
+
+    async def fetch(self) -> list[RadarItem]:
+        response = await self._client.get(
+            "https://github.com/trending",
+            headers={"Accept": "text/html", "User-Agent": "semantic-cache-radar/0.1"},
+        )
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+        items: list[RadarItem] = []
+
+        for article in soup.select("article.Box-row")[: self._repository_limit]:
+            link = article.select_one("h2 a")
+            if link is None:
+                continue
+            path = " ".join(link.get("href", "").split())
+            path = path.strip("/")
+            if "/" not in path:
+                continue
+            description_node = article.select_one("p")
+            title = path.replace("/", " ", 1)
+            items.append(
+                RadarItem(
+                    source="github-trending",
+                    external_id=path,
+                    title=title,
+                    url=f"https://github.com/{path}",
+                    summary=description_node.get_text(" ", strip=True)
+                    if description_node
+                    else None,
                 )
             )
         return items
