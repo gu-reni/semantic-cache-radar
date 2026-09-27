@@ -1,8 +1,9 @@
+import os
 from functools import lru_cache
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from radar.app.models import RadarItem
 from radar.app.repository import RadarRepository
@@ -22,7 +23,7 @@ class RadarItemResponse(BaseModel):
 
 
 def _database_path() -> str:
-    return "./data/radar.db"
+    return os.getenv("RADAR_DATABASE_PATH", "./data/radar.db")
 
 
 @lru_cache
