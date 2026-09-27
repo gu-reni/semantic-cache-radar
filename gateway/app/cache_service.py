@@ -15,6 +15,18 @@ class CacheResult:
     cache_id: str | None = None
 
 
+@dataclass(frozen=True)
+class CacheStats:
+    requests: int
+    hits: int
+    misses: int
+    stored_entries: int
+
+    @property
+    def hit_rate(self) -> float:
+        return self.hits / self.requests if self.requests else 0.0
+
+
 class SemanticCache:
     """Coordinate embedding, vector search, TTL checks, and cache writes."""
 
@@ -31,6 +43,9 @@ class SemanticCache:
         self._similarity_threshold = similarity_threshold
         self._ttl_seconds = ttl_seconds
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._requests = 0
+        self._hits = 0
+        self._misses = 0
 
     async def get_or_create(
         self,
@@ -38,12 +53,14 @@ class SemanticCache:
         generate_answer: Callable[[], Awaitable[str]],
         metadata: dict[str, Any] | None = None,
     ) -> CacheResult:
+        self._requests += 1
         query_embedding = self._embedding_service.encode_query(question)
         matches = self._vector_store.search(query_embedding, limit=5)
         now = self._clock()
 
         for match in matches:
             if self._is_valid_match(match, now):
+                self._hits += 1
                 return CacheResult(
                     answer=match.answer,
                     hit=True,
@@ -51,6 +68,7 @@ class SemanticCache:
                     cache_id=match.cache_id,
                 )
 
+        self._misses += 1
         answer = await generate_answer()
         expires_at = now + timedelta(seconds=self._ttl_seconds)
         entry_metadata = {
@@ -65,6 +83,20 @@ class SemanticCache:
             metadata=entry_metadata,
         )
         return CacheResult(answer=answer, hit=False, cache_id=cache_id)
+
+    def stats(self) -> CacheStats:
+        return CacheStats(
+            requests=self._requests,
+            hits=self._hits,
+            misses=self._misses,
+            stored_entries=self._vector_store.count(),
+        )
+
+    def clear(self) -> None:
+        self._vector_store.clear()
+        self._requests = 0
+        self._hits = 0
+        self._misses = 0
 
     def _is_valid_match(self, match: VectorMatch, now: datetime) -> bool:
         if match.similarity < self._similarity_threshold:

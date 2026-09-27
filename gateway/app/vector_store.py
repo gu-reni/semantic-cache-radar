@@ -78,3 +78,11 @@ class VectorStore:
 
     def count(self) -> int:
         return self._collection.count()
+
+    def clear(self) -> None:
+        """Delete all entries while keeping the collection available."""
+        self._client.delete_collection(self._collection.name)
+        self._collection = self._client.get_or_create_collection(
+            name=self._collection.name,
+            metadata={"hnsw:space": "cosine"},
+        )

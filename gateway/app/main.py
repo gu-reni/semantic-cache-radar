@@ -37,6 +37,28 @@ def get_semantic_cache() -> SemanticCache:
     )
 
 
+@app.get("/cache/stats")
+async def cache_stats(
+    cache: Annotated[SemanticCache, Depends(get_semantic_cache)],
+) -> dict[str, float | int]:
+    stats = cache.stats()
+    return {
+        "requests": stats.requests,
+        "hits": stats.hits,
+        "misses": stats.misses,
+        "hit_rate": stats.hit_rate,
+        "stored_entries": stats.stored_entries,
+    }
+
+
+@app.delete("/cache")
+async def clear_cache(
+    cache: Annotated[SemanticCache, Depends(get_semantic_cache)],
+) -> dict[str, str]:
+    cache.clear()
+    return {"status": "cleared"}
+
+
 def _cache_question(request: ChatCompletionRequest) -> str:
     return "\n".join(f"{message.role}: {message.content}" for message in request.messages)
 
