@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     llm_model: str="deepseek-chat"
     llm_api_key: str = ""
 
-    embedding_model_path: str="./models/bge-small-zh-v1.5"
+    embedding_model_path: str = "./models/multilingual-e5-small"
 
     cache_similarity_threshold: float=0.92
     cache_ttl_seconds: int=86400
