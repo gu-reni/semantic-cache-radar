@@ -1,13 +1,18 @@
 """对外展示页面的路由与缓存头测试。
 
-两件容易出问题的事：
+三件容易出问题的事：
   1. 缓存头只该给页面和静态资源，不该给 JSON 接口 —— 写反了监控会读到过期数据。
   2. 静态资源必须发对 Content-Type，否则浏览器会拒绝应用 CSS/JS。
+  3. 这份服务有一份无鉴权、绑在公网上的实例，接口文档不能跟着一起露出去。
 """
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
 from radar.app.main import app
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture(autouse=True)
@@ -76,3 +81,25 @@ def test_json_endpoint_does_not_send_cache_control(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert "cache-control" not in {key.lower() for key in response.headers}
+
+
+@pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
+def test_api_docs_are_disabled(client: TestClient, path: str) -> None:
+    """接口文档不能在公网实例上暴露。
+
+    这个服务有一份无鉴权、绑在公网展示的实例，FastAPI 默认打开的 /docs
+    会把全部接口与数据结构一并露出去。页面与 /radar/items 都不依赖它们。
+    """
+    assert client.get(path).status_code == 404
+
+
+def test_compose_keeps_gateway_out_of_the_collector_proxy() -> None:
+    """采集器走代理时，NO_PROXY 必须包含 gateway。
+
+    radar 调本机网关走的是服务名 http://gateway:8000。这条一旦也被代理接管，
+    代理不认识这个名字，语义缓存整条链路会当场全断 —— 而且现象只是"采集全部失败"，
+    不会提示跟代理有关。
+    """
+    compose = (PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "NO_PROXY: gateway,127.0.0.1,localhost" in compose

@@ -54,8 +54,18 @@ services:
     environment:
       GATEWAY_BASE_URL: http://gateway:8000
       RADAR_DATABASE_PATH: /app/data/radar.db
+      # 采集源里 V2EX 与 GitHub 从大陆云主机直连不通，需要走代理。
+      # 代理地址由 .env 的 COLLECTOR_HTTP_PROXY 提供，留空则直连（本机开发就是这样）。
+      #
+      # ⚠️ NO_PROXY 里那个 gateway 是必须的：radar 调本机网关走的是服务名
+      #    http://gateway:8000，一旦被代理接管，代理不认识这个名字，整条链路会当场全断。
+      HTTP_PROXY: ${COLLECTOR_HTTP_PROXY:-}
+      HTTPS_PROXY: ${COLLECTOR_HTTP_PROXY:-}
+      NO_PROXY: gateway,127.0.0.1,localhost
     ports:
-      - "127.0.0.1:8001:8001"
+      # 唯一一处故意对外的监听：公开的资讯页面（无鉴权，内容只读）。
+      # 网关持有大模型 Key，仍然只绑回环，绝不对公网开放。
+      - "8085:8001"
     volumes:
       - ./data:/app/data
     mem_limit: 256m

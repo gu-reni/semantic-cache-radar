@@ -31,7 +31,16 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             scheduler.shutdown(wait=False)
 
 
-app = FastAPI(title="Technical Radar API", version="0.1.0", lifespan=lifespan)
+# /docs 与 /openapi.json 关掉：这个服务有一份绑在公网上对外展示的实例，
+# 没有鉴权，不该顺带把接口文档一起露出去。页面和 /radar/items 都不依赖它们。
+app = FastAPI(
+    title="Technical Radar API",
+    version="0.1.0",
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 
 
 @app.middleware("http")
