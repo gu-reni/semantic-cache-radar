@@ -20,9 +20,27 @@ logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
 
 
+def configure_logging() -> None:
+    """让应用自己的日志在 uvicorn 下真的能被看见。
+
+    uvicorn 只配置它自己的 logger（`uvicorn.*` 自带 handler 且不向上传播），
+    根 logger 仍停在 WARNING 且没有 handler。后果是应用里 `logger.info(...)`
+    写的东西全部被静默丢弃 —— 定时采集每 6 小时才跑一次，
+    日志一旦没了，「它到底跑没跑、采了多少、哪条源挂了」就无从查证。
+    """
+    app_logger = logging.getLogger("radar")
+    if not app_logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+        app_logger.addHandler(handler)
+    app_logger.setLevel(logging.INFO)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """随接口进程一起启停定时采集任务。"""
+    # 必须在 uvicorn 配好日志之后再做，否则会被它覆盖掉。
+    configure_logging()
     scheduler = start_scheduler()
     try:
         yield
