@@ -1,0 +1,270 @@
+/* 技术雷达页面样式。
+   约束（来自本机既有的对外页面规范，逐条自查过）：
+   - 零外部依赖：不引用任何 CDN，字体只用系统栈，噪点是内联 data URI。
+   - 配色低饱和暖调：墨色底 + 暖白字 + 唯一一个琥珀色强调，色相 35°。
+   - 圆角 ≤ 8px，层次靠留白与字重，不用发光和重阴影。
+   - 背景动效纯 CSS（动一层伪元素的 transform），prefers-reduced-motion 下停下。 */
+
+:root {
+  --ink: #15130f;
+  --ink-soft: #1c1915;
+  --rule: #2b2620;
+  --text: #e9e3d7;
+  --text-dim: #97907f;
+  --accent: #c08a3e;
+  --measure: 44rem;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--ink);
+  color: var(--text);
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Source Han Sans SC",
+    system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 16px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 背景：一层缓慢漂移的噪点。
+   位移量必须等于图块尺寸（140px）才无缝，否则会看到接缝。
+   inset 扩到图块之外，保证漂移时边缘不露白。 */
+.grain {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.grain::before {
+  content: "";
+  position: absolute;
+  inset: -240px;
+  /* 两处都踩过：
+     ① feTurbulence 默认不可平铺，边对不上会露出方格拼缝 —— 用 stitchTiles='stitch' 解决。
+     ② 但就算接缝对了，低频花纹仍会在图块尺度上循环，屏幕上出现规律的横向条带。
+        所以把 baseFrequency 提到 1.6（颗粒更细、低频结构没了），图块放大到 220px。
+     位移量必须等于图块尺寸才无缝，改图块时这里要一起改。 */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.6' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.035;
+  animation: grain-drift 24s linear infinite;
+}
+
+/* 一层极淡的暖色光晕，让画面不平，但不形成可辨认的形状。 */
+.grain::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(60rem 34rem at 18% -12%, rgba(192, 138, 62, 0.09), transparent 70%),
+    radial-gradient(48rem 30rem at 92% 108%, rgba(192, 138, 62, 0.05), transparent 72%);
+}
+
+@keyframes grain-drift {
+  from { transform: translate3d(0, 0, 0); }
+  /* 位移量必须等于噪点图块尺寸（见 .grain::before），否则循环时会出现接缝。 */
+  to { transform: translate3d(-220px, -220px, 0); }
+}
+
+header, main, footer {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+/* 报头 */
+.masthead {
+  padding-top: 4.5rem;
+  padding-bottom: 2.25rem;
+}
+
+.masthead h1 {
+  margin: 0;
+  font-family: "Noto Serif SC", "Songti SC", "Source Han Serif SC", Georgia, serif;
+  font-size: 2.4rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1.25;
+}
+
+.masthead h1::after {
+  content: "";
+  display: block;
+  width: 2.75rem;
+  height: 2px;
+  margin-top: 1.1rem;
+  background: var(--accent);
+}
+
+.standfirst {
+  margin: 1.1rem 0 0;
+  color: var(--text-dim);
+  font-size: 0.95rem;
+}
+
+/* 来源筛选 */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.filter {
+  appearance: none;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 0.3rem 0.7rem;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.filter:hover { color: var(--text); }
+
+.filter.is-active {
+  color: var(--accent);
+  border-color: rgba(192, 138, 62, 0.45);
+}
+
+.filter:focus-visible,
+.entry a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+.status {
+  margin: 1.5rem 0;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+
+.status[hidden] { display: none; }
+
+/* 条目列表：左侧元信息窄栏 + 右侧正文，
+   刻意不用等权卡片网格（那是最典型的模板长相）。 */
+.entries {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.entry {
+  display: grid;
+  grid-template-columns: 8.5rem 1fr;
+  gap: 0 1.75rem;
+  padding: 1.6rem 0 1.6rem 1.1rem;
+  border-top: 1px solid var(--rule);
+  border-left: 2px solid transparent;
+  transition: border-color 0.15s ease;
+}
+
+.entry:hover { border-left-color: var(--accent); }
+
+.entry .meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  padding-top: 0.3rem;
+}
+
+.entry .source {
+  color: var(--accent);
+  letter-spacing: 0.04em;
+}
+
+.entry h2 {
+  margin: 0;
+  font-size: 1.08rem;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.entry h2 a {
+  color: var(--text);
+  text-decoration: none;
+  background-image: linear-gradient(var(--accent), var(--accent));
+  background-repeat: no-repeat;
+  background-position: 0 100%;
+  background-size: 0 1px;
+  transition: background-size 0.25s ease, color 0.15s ease;
+}
+
+.entry h2 a:hover {
+  color: var(--accent);
+  background-size: 100% 1px;
+}
+
+.entry .summary {
+  margin: 0.55rem 0 0;
+  color: var(--text-dim);
+  font-size: 0.94rem;
+}
+
+.entry .tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.7rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.entry .tags li {
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 0.1rem 0.5rem;
+  color: var(--text-dim);
+  font-size: 0.76rem;
+}
+
+footer {
+  padding-top: 2rem;
+  padding-bottom: 4rem;
+  border-top: 1px solid var(--rule);
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+footer p { margin: 0; }
+
+/* 窄屏（验收宽度 390px）：左栏收进标题上方，避免正文被压成逐字断行。 */
+@media (max-width: 560px) {
+  .masthead { padding-top: 3rem; }
+  .masthead h1 { font-size: 1.9rem; }
+
+  .entry {
+    grid-template-columns: 1fr;
+    gap: 0.45rem;
+    padding-left: 0.85rem;
+  }
+
+  .entry .meta {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 0.6rem;
+    padding-top: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grain::before { animation: none; }
+  .entry h2 a { transition: none; }
+}

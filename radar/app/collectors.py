@@ -1,11 +1,30 @@
 import asyncio
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 from bs4 import BeautifulSoup
 
 from radar.app.models import RadarItem
+
+
+def _unix_to_iso(value: Any) -> str | None:
+    """把 Unix 秒转成 ISO-8601（UTC），拿不到就返回 None。
+
+    为什么统一在这里转：
+      RadarItem.published_at 声明是 str | None，它就该是自解释的 ISO 字符串。
+      原先把 HN 与 V2EX 的 Unix 时间戳直接 str() 塞进去，于是同一个字段
+      有的源是 Unix 秒、有的源是 None，接口语义不自洽。前端
+      new Date('1790648874') 会被当成「年份 1790648874」而变成 Invalid Date，
+      时间是空白的 —— 而且这个坑每个消费者都要再踩一次。
+    """
+    if not value:
+        return None
+    try:
+        return datetime.fromtimestamp(int(value), tz=UTC).isoformat()
+    except (TypeError, ValueError, OSError, OverflowError):
+        return None
 
 
 class HackerNewsCollector:
@@ -40,7 +59,7 @@ class HackerNewsCollector:
                 external_id=str(story_id),
                 title=str(title),
                 url=str(story.get("url") or f"https://news.ycombinator.com/item?id={story_id}"),
-                published_at=str(story.get("time")) if story.get("time") else None,
+                published_at=_unix_to_iso(story.get("time")),
             )
 
         results = await _gather_limited(story_ids, fetch_story)
@@ -71,7 +90,7 @@ class V2EXCollector:
                     external_id=str(topic_id),
                     title=str(title),
                     url=str(topic.get("url") or f"https://www.v2ex.com/t/{topic_id}"),
-                    published_at=str(topic.get("created")) if topic.get("created") else None,
+                    published_at=_unix_to_iso(topic.get("created")),
                 )
             )
         return items
