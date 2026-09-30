@@ -1,0 +1,48 @@
+# 端到端联调用的编排覆盖文件。
+#
+# 用途：不接真实大模型，用假上游把「客户端 → 网关 → 上游模型」整条链路跑通，
+# 并验证语义缓存的命中行为与 Token 节省。
+#
+# 与 docker-compose.yml 一起使用：
+#   bash scripts/prepare_runtime_dirs.sh
+#   docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d
+#   python3 scripts/dev/e2e_cache_test.py
+#
+# 假上游放在同一个 compose 网络内，而不是跑在宿主机上：
+#   生产主机的防火墙默认只放行显式开过的端口，容器经 host.docker.internal
+#   回连未放行的端口会被静默丢包（表现为超时，不是拒绝），排查成本很高。
+#   放进同一网络后走 Docker 内建 DNS，不经过宿主机防火墙，也更易搬到别的机器。
+#
+# 注意：本文件里的令牌是联调专用明文，不具备任何真实权限。
+
+services:
+  fake-upstream:
+    image: python:3.11-slim
+    command: ["python", "/fake/fake_upstream.py", "9099"]
+    volumes:
+      - ./scripts/dev/fake_upstream.py:/fake/fake_upstream.py:ro
+    # 只绑回环：仅供宿主机上的联调脚本查询调用计数。
+    ports:
+      - "127.0.0.1:9099:9099"
+    restart: "no"
+
+  gateway:
+    environment:
+      LLM_BASE_URL: http://fake-upstream:9099
+      LLM_MODEL: fake-model
+      LLM_API_KEY: fake-key-for-local-test
+      GATEWAY_AUTH_TOKEN: e2e-token
+    ports:
+      - "127.0.0.1:18000:8000"
+    depends_on:
+      - fake-upstream
+
+  radar:
+    environment:
+      GATEWAY_BASE_URL: http://gateway:8000
+      GATEWAY_AUTH_TOKEN: e2e-token
+      RADAR_DATABASE_PATH: /app/data/radar.db
+      # 联调时要可预测，关掉定时采集；采集本身用 --once 单独验证。
+      RADAR_SCHEDULER_ENABLED: "false"
+    ports:
+      - "127.0.0.1:18001:8001"

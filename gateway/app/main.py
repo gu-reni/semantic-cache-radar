@@ -1,7 +1,11 @@
+import logging
+import secrets
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
 
 from gateway.app.cache_service import GeneratedAnswer, SemanticCache
 from gateway.app.config import get_settings
@@ -10,10 +14,49 @@ from gateway.app.llm_client import LLMClient
 from gateway.app.schemas import ChatCompletionRequest
 from gateway.app.vector_store import VectorStore
 
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """未配置令牌时给出显式告警，避免把不设防的网关部署到公网。"""
+    if not get_settings().gateway_auth_token:
+        logger.warning(
+            "GATEWAY_AUTH_TOKEN 未配置：/v1/chat/completions 与 DELETE /cache 不校验身份。"
+            "仅限本地开发；部署到公网机器前必须设置该变量。"
+        )
+    yield
+
+
 app = FastAPI(
     title="Semantic Cache Gateway",
     version="0.1.0",
+    lifespan=lifespan,
 )
+
+
+def require_gateway_token(
+    authorization: Annotated[str | None, Header()] = None,
+    x_gateway_token: Annotated[str | None, Header()] = None,
+) -> None:
+    """校验调用方身份。
+
+    网关持有上游大模型的 API Key，若不校验身份又对外可达，
+    等于把这个 Key 借给任何扫到端口的人去刷 Token。
+    令牌可放在 Authorization: Bearer <token> 或 X-Gateway-Token 头里。
+    """
+    expected = get_settings().gateway_auth_token
+    if not expected:
+        # 未配置时不校验，启动时已打过告警。
+        return
+
+    provided = x_gateway_token
+    if not provided and authorization:
+        provided = authorization.removeprefix("Bearer ").strip()
+
+    # 用恒定时间比较，避免通过响应耗时逐字节猜出令牌。
+    if not provided or not secrets.compare_digest(provided, expected):
+        raise HTTPException(status_code=401, detail="invalid or missing gateway token")
 
 
 @app.get("/health")
@@ -55,7 +98,7 @@ async def cache_stats(
     }
 
 
-@app.delete("/cache")
+@app.delete("/cache", dependencies=[Depends(require_gateway_token)])
 async def clear_cache(
     cache: Annotated[SemanticCache, Depends(get_semantic_cache)],
 ) -> dict[str, str]:
@@ -77,15 +120,24 @@ def _answer_from_completion(completion: dict) -> str:
     return content
 
 
-@app.post("/v1/chat/completions")
+@app.post("/v1/chat/completions", dependencies=[Depends(require_gateway_token)])
 async def create_chat_completion(
     request: ChatCompletionRequest,
     response: Response,
     client: Annotated[LLMClient, Depends(get_llm_client)],
     cache: Annotated[SemanticCache, Depends(get_semantic_cache)],
+    x_cache_mode: Annotated[str, Header()] = "semantic",
 ) -> dict:
-    """Serve a cached answer or forward the request to the configured upstream."""
+    """Serve a cached answer or forward the request to the configured upstream.
+
+    X-Cache-Mode 头控制复用策略：
+      semantic（默认）—— 按向量相似度复用，适合语义不同则问题不同的自然提问。
+      exact            —— 仅当文本完全相同时复用。提示词模板占比很高、
+                          只有小段内容在变的批量任务（如雷达采集）必须用这个，
+                          否则整批请求会共用同一个答案。
+    """
     upstream_request = request.model_dump(exclude_none=True)
+    cache_mode = "exact" if x_cache_mode.strip().lower() == "exact" else "semantic"
 
     async def generate_answer() -> GeneratedAnswer:
         completion = await client.chat_completion(upstream_request)
@@ -96,6 +148,7 @@ async def create_chat_completion(
         question=_cache_question(request),
         generate_answer=generate_answer,
         metadata={"model": request.model or get_settings().llm_model},
+        cache_mode=cache_mode,
     )
     response.headers["X-Cache"] = "HIT" if result.hit else "MISS"
     if result.similarity is not None:

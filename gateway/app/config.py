@@ -13,6 +13,12 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
 
     embedding_model_path: str = "./models/multilingual-e5-small"
+    # ONNX 推理线程数；按 CPU 核数设置，2 核机器上设 2 即可。
+    embedding_threads: int = 2
+
+    # 网关共享令牌。为空时不校验，仅限本地开发；
+    # 部署到公网机器上必须设置，否则任何人都能借网关的 Key 刷上游 Token。
+    gateway_auth_token: str = ""
 
     vector_store_path: str = "./data/chroma"
     cache_similarity_threshold: float = 0.92

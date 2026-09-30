@@ -2,9 +2,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from gateway.app.config import Settings
 from gateway.app.cache_service import CacheResult, GeneratedAnswer
-from gateway.app.llm_client import LLMClient
 from gateway.app.main import app, get_llm_client, get_semantic_cache
 
 
@@ -38,8 +36,16 @@ class FakeLLMClient:
 class FakeSemanticCache:
     def __init__(self, hit: bool = False) -> None:
         self.hit = hit
+        self.cache_mode: str | None = None
 
-    async def get_or_create(self, question: str, generate_answer: Any, metadata: Any) -> CacheResult:
+    async def get_or_create(
+        self,
+        question: str,
+        generate_answer: Any,
+        metadata: Any,
+        cache_mode: str = "semantic",
+    ) -> CacheResult:
+        self.cache_mode = cache_mode
         if self.hit:
             return CacheResult(
                 answer="cached answer",

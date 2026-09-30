@@ -46,7 +46,7 @@ class RadarRepository:
 
     def upsert(self, item: RadarItem) -> int:
         with self._connect() as connection:
-            cursor = connection.execute(
+            connection.execute(
                 """
                 INSERT INTO radar_items (
                     source, external_id, title, url, published_at, summary, tags_json

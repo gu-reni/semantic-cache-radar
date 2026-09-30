@@ -68,6 +68,7 @@ class SemanticCache:
         question: str,
         generate_answer: Callable[[], Awaitable[GeneratedAnswer]],
         metadata: dict[str, Any] | None = None,
+        cache_mode: str = "semantic",
     ) -> CacheResult:
         self._requests += 1
         query_embedding = self._embedding_service.encode_query(question)
@@ -75,7 +76,7 @@ class SemanticCache:
         now = self._clock()
 
         for match in matches:
-            if self._is_valid_match(match, now):
+            if self._is_valid_match(match, now, question, cache_mode):
                 self._hits += 1
                 saved_tokens = int(match.metadata.get("total_tokens", 0))
                 self._saved_tokens += saved_tokens
@@ -135,7 +136,24 @@ class SemanticCache:
         self._total_tokens = 0
         self._saved_tokens = 0
 
-    def _is_valid_match(self, match: VectorMatch, now: datetime) -> bool:
+    def _is_valid_match(
+        self,
+        match: VectorMatch,
+        now: datetime,
+        question: str,
+        cache_mode: str,
+    ) -> bool:
+        """判断候选条目能否复用。
+
+        cache_mode 为什么存在：
+          语义缓存按向量相似度复用答案，前提是「问题不同则语义不同」。
+          但雷达的提示词里模板占了绝大部分篇幅，只有标题在变，
+          整批提示词的余弦相似度都会越过阈值，结果 20 条资讯共用同一个摘要。
+          这类场景只能按文本完全一致来复用，于是有了 exact 模式。
+        """
+        if cache_mode == "exact" and match.question != question:
+            return False
+
         if match.similarity < self._similarity_threshold:
             return False
 

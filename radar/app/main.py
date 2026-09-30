@@ -1,4 +1,7 @@
+import logging
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from functools import lru_cache
 from typing import Annotated
 
@@ -7,8 +10,23 @@ from pydantic import BaseModel
 
 from radar.app.models import RadarItem
 from radar.app.repository import RadarRepository
+from radar.app.scheduler import start_scheduler
 
-app = FastAPI(title="Technical Radar API", version="0.1.0")
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """随接口进程一起启停定时采集任务。"""
+    scheduler = start_scheduler()
+    try:
+        yield
+    finally:
+        if scheduler is not None:
+            scheduler.shutdown(wait=False)
+
+
+app = FastAPI(title="Technical Radar API", version="0.1.0", lifespan=lifespan)
 
 
 class RadarItemResponse(BaseModel):

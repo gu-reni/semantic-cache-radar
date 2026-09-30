@@ -9,8 +9,11 @@ python-dotenv>=1.0,<2.0
 # 调用 OpenAI 兼容的大模型接口。
 openai>=1.55,<2.0
 
-# 本地 Embedding 与嵌入式向量数据库。
-sentence-transformers>=3.3,<4.0
+# 本地 Embedding（ONNX 推理，不引入 PyTorch）与嵌入式向量数据库。
+# onnxruntime 的内存占用约为 torch 的三分之一，纯 CPU 机器上更合适。
+onnxruntime>=1.20,<2.0
+tokenizers>=0.21,<1.0
+numpy>=2.0,<3.0
 chromadb>=0.5,<1.0
 
 # 技术雷达的数据抓取、HTML 解析与定时任务。

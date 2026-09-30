@@ -18,9 +18,16 @@ class EnrichmentResult:
 class GatewayEnricher:
     """Generate a summary and tags through the semantic cache gateway."""
 
-    def __init__(self, client: httpx.AsyncClient, gateway_url: str) -> None:
+    def __init__(
+        self,
+        client: httpx.AsyncClient,
+        gateway_url: str,
+        auth_token: str | None = None,
+    ) -> None:
         self._client = client
         self._gateway_url = gateway_url.rstrip("/")
+        # 网关若配置了共享令牌，雷达也必须带上，否则会被 401 拒掉。
+        self._headers = {"X-Gateway-Token": auth_token} if auth_token else {}
 
     async def enrich(self, item: RadarItem) -> RadarItem:
         prompt = (
@@ -30,6 +37,7 @@ class GatewayEnricher:
         )
         response = await self._client.post(
             f"{self._gateway_url}/v1/chat/completions",
+            headers={**self._headers, "X-Cache-Mode": "exact"},
             json={
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0,

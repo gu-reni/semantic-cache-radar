@@ -2,13 +2,16 @@ import argparse
 import asyncio
 import logging
 import os
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
 import httpx
 
-from radar.app.collectors import GitHubTrendingCollector, HackerNewsCollector, V2EXCollector
+from radar.app.collectors import (
+    GitHubTrendingCollector,
+    HackerNewsCollector,
+    V2EXCollector,
+)
 from radar.app.pipeline import EnrichmentResult, GatewayEnricher, RadarPipeline
 from radar.app.repository import RadarRepository
 
@@ -62,6 +65,8 @@ async def run_configured_once() -> RadarRunResult:
     gateway_url = os.getenv("GATEWAY_BASE_URL", "http://127.0.0.1:8000")
     database_path = os.getenv("RADAR_DATABASE_PATH", "./data/radar.db")
     story_limit = int(os.getenv("RADAR_ITEM_LIMIT", "10"))
+    # 与网关共用同一个共享令牌；网关未配置令牌时这里留空即可。
+    gateway_token = os.getenv("GATEWAY_AUTH_TOKEN") or None
 
     async with httpx.AsyncClient(timeout=20.0) as client:
         collectors = [
@@ -71,7 +76,7 @@ async def run_configured_once() -> RadarRunResult:
         ]
         pipeline = RadarPipeline(
             RadarRepository(database_path),
-            GatewayEnricher(client, gateway_url),
+            GatewayEnricher(client, gateway_url, auth_token=gateway_token),
         )
         return await RadarRunner(collectors, pipeline).run_once()
 
