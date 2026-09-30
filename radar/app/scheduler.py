@@ -48,12 +48,14 @@ async def run_collection_job() -> None:
         return
 
     logger.info(
-        "雷达采集完成 fetched=%s processed=%s stored=%s failed=%s source_failures=%s",
+        "雷达采集完成 fetched=%s processed=%s stored=%s failed=%s "
+        "source_failures=%s failed_sources=%s",
         result.fetched,
         result.processed,
         result.stored,
         result.failed,
         result.source_failures,
+        ",".join(result.failed_sources) or "-",
     )
 
 

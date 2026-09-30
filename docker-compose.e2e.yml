@@ -17,7 +17,9 @@
 
 services:
   fake-upstream:
-    image: python:3.11-slim
+    # 复用网关镜像（同为 python:3.11-slim 基础、已装好依赖），
+    # 免得为了一个几十行的假上游再往目标机器上拉一个基础镜像。
+    image: semantic-cache-radar-gateway:latest
     command: ["python", "/fake/fake_upstream.py", "9099"]
     volumes:
       - ./scripts/dev/fake_upstream.py:/fake/fake_upstream.py:ro

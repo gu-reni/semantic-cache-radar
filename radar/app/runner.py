@@ -30,6 +30,9 @@ class RadarRunResult:
     stored: int
     failed: int
     source_failures: int
+    # 具体是哪几个源挂了。只记计数的话，线上看到「挂了 2 个」还得逐个手工探测才能
+    # 知道是谁，而日志里 httpx 超时异常的 str() 本身是空串，等于什么线索都没有。
+    failed_sources: tuple[str, ...] = ()
 
 
 class RadarRunner:
@@ -43,13 +46,16 @@ class RadarRunner:
 
     async def run_once(self) -> RadarRunResult:
         items = []
-        source_failures = 0
+        failed_sources: list[str] = []
         for collector in self._collectors:
+            name = type(collector).__name__
             try:
                 items.extend(await collector.fetch())
             except (httpx.HTTPError, ValueError) as exc:
-                source_failures += 1
-                logger.warning("collector failed: %s", exc)
+                failed_sources.append(name)
+                # 用 %r 而不是 %s：httpx 的超时异常 str() 是空串，
+                # 只打 %s 只会得到一行没有任何信息的 "collector failed:"。
+                logger.warning("采集源失败 source=%s error=%r", name, exc)
 
         enrichment: EnrichmentResult = await self._pipeline.process(items)
         return RadarRunResult(
@@ -57,7 +63,8 @@ class RadarRunner:
             processed=enrichment.processed,
             stored=enrichment.stored,
             failed=enrichment.failed,
-            source_failures=source_failures,
+            source_failures=len(failed_sources),
+            failed_sources=tuple(failed_sources),
         )
 
 

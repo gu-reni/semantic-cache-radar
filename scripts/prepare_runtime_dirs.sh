@@ -16,6 +16,15 @@
 #   CONTAINER_UID / CONTAINER_GID   容器内进程的 uid/gid，默认都是 1000
 set -euo pipefail
 
+# 目录一律建在项目根下，而不是调用者当前所在的目录。
+# 否则从 /root 里执行会把 data/models 建到 /root 去，
+# 脚本照样报成功，容器却因为目录不对而报权限错或找不到模型。
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+cd "$PROJECT_ROOT"
+echo "  项目根目录：$PROJECT_ROOT"
+echo
+
 CONTAINER_UID="${CONTAINER_UID:-1000}"
 CONTAINER_GID="${CONTAINER_GID:-1000}"
 TARGET_OWNER="${CONTAINER_UID}:${CONTAINER_GID}"

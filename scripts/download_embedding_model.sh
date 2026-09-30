@@ -21,9 +21,15 @@
 #   HF_MIRROR        镜像地址，默认 https://hf-mirror.com
 set -euo pipefail
 
+# 默认落到项目根下的 models/，而不是调用者当前所在的目录。
+# 否则从 /root 里执行会把 130MB 模型下到 /root/models 去，
+# 脚本报成功，网关启动却找不到模型。
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
 REPO="${EMBEDDING_REPO:-Xenova/multilingual-e5-small}"
 MIRROR="${HF_MIRROR:-https://hf-mirror.com}"
-TARGET="${1:-models/multilingual-e5-small}"
+TARGET="${1:-$PROJECT_ROOT/models/multilingual-e5-small}"
 
 # 源文件路径:落盘文件名
 FILES=(
