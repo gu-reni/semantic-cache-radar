@@ -235,6 +235,53 @@ header, main, footer {
   font-size: 0.76rem;
 }
 
+/* 证据等级筛选行：与来源筛选同一套样式，仅加上与上一行的间距。 */
+.level-filters {
+  margin-top: 0.5rem;
+}
+
+/* 证据等级徽标。颜色只用低饱和暖调：琥珀是唯一强调色（证据充分），
+   其余三档都是接近中性或暖砖的暗色，不引入蓝紫。 */
+.evidence-level {
+  display: inline-block;
+  padding: 0 0.45rem;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.evidence-level.level-sufficient {
+  color: var(--accent);
+  border-color: rgba(192, 138, 62, 0.45);
+}
+
+.evidence-level.level-accumulating { color: #a39577; }
+
+.evidence-level.level-emerging { color: var(--text-dim); }
+
+.evidence-level.level-redflag {
+  color: #b0604a;
+  border-color: rgba(176, 96, 74, 0.4);
+}
+
+/* 源站量化指标：一行小字，等宽数字便于横向扫读。 */
+.entry .metrics {
+  margin: 0.4rem 0 0;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 「另有 N 条疑似同一事件」：事实陈述，不是「已合并」的断言。 */
+.entry .same-event {
+  margin: 0.5rem 0 0;
+  color: var(--accent);
+  font-size: 0.78rem;
+}
+
 footer {
   padding-top: 2rem;
   padding-bottom: 4rem;

@@ -6,6 +6,7 @@
  *      的标题就能在本站执行脚本。
  *   2. 链接只允许 http/https，其它协议（javascript:、data: 等）直接丢弃，
  *      不渲染成可点的东西。
+ * 证据等级与「另有 N 条疑似同一事件」同样只做事实呈现，不做「已合并」的断言。
  */
 
 const SOURCE_LABELS = {
@@ -14,11 +15,31 @@ const SOURCE_LABELS = {
   "v2ex": "V2EX",
 };
 
+// 证据等级 -> CSS 类名。等级文本本身来自后端固定四档，但 CSS 类走这张白名单，
+// 不直接拼接等级文本，免得哪天等级命名变了带出意外的类名。
+const LEVEL_CLASS = {
+  "证据充分": "level-sufficient",
+  "信号在积累": "level-accumulating",
+  "刚出现": "level-emerging",
+  "有红旗": "level-redflag",
+};
+
+// 源站量化指标的中文标签与展示顺序。只展示数字型指标，author/node/language
+// 这类身份信息不上页面（它们不是「证据强度」）。
+const METRIC_LABELS = {
+  points: "点",
+  comments: "评论",
+  replies: "回复",
+  stars: "星",
+  stars_today: "今日新增",
+};
+const METRIC_ORDER = ["points", "comments", "replies", "stars", "stars_today"];
+
 const entriesEl = document.getElementById("entries");
 const statusEl = document.getElementById("status");
 const updatedEl = document.getElementById("updated");
 
-let state = { source: "", items: [] };
+let state = { source: "", level: "", items: [] };
 
 function safeUrl(value) {
   try {
@@ -43,6 +64,18 @@ function formatTime(value) {
   return sameDay ? clock : `${date.getMonth() + 1}月${date.getDate()}日 ${clock}`;
 }
 
+function metricParts(metrics) {
+  if (!metrics || typeof metrics !== "object") return [];
+  const parts = [];
+  for (const key of METRIC_ORDER) {
+    const value = metrics[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      parts.push(`${METRIC_LABELS[key]} ${value}`);
+    }
+  }
+  return parts;
+}
+
 function renderItem(item) {
   const li = document.createElement("li");
   li.className = "entry";
@@ -58,6 +91,12 @@ function renderItem(item) {
     const timeEl = document.createElement("time");
     timeEl.textContent = time;
     meta.append(timeEl);
+  }
+  if (item.evidence_level) {
+    const badge = document.createElement("span");
+    badge.className = "evidence-level " + (LEVEL_CLASS[item.evidence_level] || "");
+    badge.textContent = item.evidence_level;
+    meta.append(badge);
   }
 
   const body = document.createElement("div");
@@ -75,6 +114,15 @@ function renderItem(item) {
     h2.textContent = item.title || "(无标题)";
   }
   body.append(h2);
+
+  const metrics = item.metrics || {};
+  const metricText = metricParts(metrics).join(" · ");
+  if (metricText) {
+    const metricsEl = document.createElement("p");
+    metricsEl.className = "metrics";
+    metricsEl.textContent = metricText;
+    body.append(metricsEl);
+  }
 
   if (item.summary) {
     const p = document.createElement("p");
@@ -94,22 +142,33 @@ function renderItem(item) {
     body.append(ul);
   }
 
+  const peerCount = metrics.semantic_peer_count;
+  if (typeof peerCount === "number" && peerCount > 0) {
+    const note = document.createElement("p");
+    note.className = "same-event";
+    // 只陈述事实：「另有 N 条疑似同一事件」，不下「已合并 / 就是同一件事」的断言。
+    note.textContent = `另有 ${peerCount} 条疑似同一事件`;
+    body.append(note);
+  }
+
   li.append(meta, body);
   return li;
 }
 
 function render() {
-  const items = state.items;
+  const items = state.items.filter(
+    (item) => !state.level || item.evidence_level === state.level,
+  );
   entriesEl.replaceChildren(...items.map(renderItem));
 
   if (!items.length) {
     statusEl.hidden = false;
-    statusEl.textContent = state.source ? "这个来源暂时没有条目。" : "暂时没有条目。";
+    statusEl.textContent = state.source || state.level ? "这个筛选条件下暂时没有条目。" : "暂时没有条目。";
   } else {
     statusEl.hidden = true;
   }
 
-  const newest = items
+  const newest = state.items
     .map((item) => item.published_at || item.created_at)
     .filter(Boolean)
     .sort()
@@ -121,7 +180,7 @@ async function load(source) {
   statusEl.hidden = false;
   statusEl.textContent = "正在载入…";
   try {
-    const query = new URLSearchParams({ limit: "60" });
+    const query = new URLSearchParams({ limit: "100" });
     if (source) query.set("source", source);
     const response = await fetch(`/radar/items?${query}`, { headers: { Accept: "application/json" } });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -137,13 +196,23 @@ async function load(source) {
   render();
 }
 
-document.querySelectorAll(".filter").forEach((button) => {
+document.querySelectorAll(".filter[data-source]").forEach((button) => {
   button.addEventListener("click", () => {
-    document.querySelectorAll(".filter").forEach((other) => {
+    document.querySelectorAll(".filter[data-source]").forEach((other) => {
       other.classList.toggle("is-active", other === button);
     });
     state.source = button.dataset.source || "";
     load(state.source);
+  });
+});
+
+document.querySelectorAll(".filter[data-level]").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll(".filter[data-level]").forEach((other) => {
+      other.classList.toggle("is-active", other === button);
+    });
+    state.level = button.dataset.level || "";
+    render();
   });
 });
 

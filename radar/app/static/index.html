@@ -23,6 +23,14 @@
     <button type="button" class="filter" data-source="v2ex">V2EX</button>
   </nav>
 
+  <nav class="filters level-filters" aria-label="按证据等级筛选">
+    <button type="button" class="filter level is-active" data-level="">全部等级</button>
+    <button type="button" class="filter level" data-level="证据充分">证据充分</button>
+    <button type="button" class="filter level" data-level="信号在积累">信号在积累</button>
+    <button type="button" class="filter level" data-level="刚出现">刚出现</button>
+    <button type="button" class="filter level" data-level="有红旗">有红旗</button>
+  </nav>
+
   <p class="status" id="status" role="status" aria-live="polite">正在载入…</p>
 
   <ol class="entries" id="entries"></ol>
