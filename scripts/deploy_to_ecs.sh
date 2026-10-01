@@ -70,12 +70,31 @@ ssh "$HOST" "set -e
 "
 
 echo
-echo "── 3/4 重建雷达镜像 ──"
-ssh "$HOST" "cd ${TARGET} && docker compose build radar"
+echo "── 3/4 重建镜像（两个服务一起，别只构建一个）──"
+ssh "$HOST" "cd ${TARGET} && docker compose build"
 
 echo
 echo "── 4/4 重启并等健康检查 ──"
-ssh "$HOST" "cd ${TARGET} && docker compose up -d && sleep 8 && docker compose ps --format 'table {{.Name}}\t{{.Status}}'"
+# --force-recreate 不是可选项。
+# compose 判断「要不要重建容器」比的是编排文件里的配置，不是镜像内容。
+# 本地构建出的镜像 tag 一直没变，所以改了代码、重建了镜像之后，
+# `up -d` 仍然会把原来的容器原样留着 —— 表现是部署"成功"，
+# 但线上跑的完全是旧代码，而且不会有任何报错。
+# 这种失败比部署报错更糟：它看起来是好的。
+ssh "$HOST" "cd ${TARGET} && docker compose up -d --force-recreate && sleep 10 && docker compose ps --format 'table {{.Name}}\t{{.Status}}'"
+
+# 复核：所有容器的启动时间都必须是刚刚。
+# 只看到"健康"不算数 —— 一个跑了 24 小时的旧容器也是健康的，
+# 上面那次静默失效就是从这个角度溜过去的。
+echo
+echo "── 复核：容器是不是真的换了 ──"
+ssh "$HOST" "cd ${TARGET} && docker compose ps --format '{{.Name}} {{.Status}}' | while read -r name status; do
+  case \"\$status\" in
+    *'Up '*[Ss]econd*|*'Up Less than a minute'*) echo \"  \$name  \$status  ✓ 刚启动\" ;;
+    *'Up '*[Mm]inute*) echo \"  \$name  \$status  ✓ 刚启动\" ;;
+    *) echo \"  \$name  \$status  ✗ 这不是刚启动的容器 —— 镜像可能没生效\" ;;
+  esac
+done"
 
 echo
 echo "完成。下一步核验："
