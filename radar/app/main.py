@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from radar.app.evidence import evidence_level
 from radar.app.models import RadarItem
 from radar.app.repository import RadarRepository
 from radar.app.scheduler import start_scheduler
@@ -98,8 +99,16 @@ class RadarItemResponse(BaseModel):
     """源站原样给的量化信号（点数/评论数/星数…）。
 
     除了 `heat_rank_in_source`（本库按源内动量算的名次）与
-    `corroborating_sources`（还有哪些源提到同一个东西）之外，
+    `corroborating_sources`（还有哪些源提到同一个东西）与
+    `semantic_peer_count`（疑似同源候选数，任务 1 记下的语义配对）之外，
     其余都是抓来就有的值，不做换算 —— 口径要改时不必重采历史数据。
+    """
+    evidence_level: str
+    """证据等级：由 metrics + 疑似同源候选数实时算出，不落库。
+
+    四档取值见 radar.app.evidence（证据充分 / 信号在积累 / 刚出现 / 有红旗）。
+    放在这里而不是 metrics 里，是因为它是「结论」不是「信号」，
+    而且每次请求都重新推导，规则一改即对全部条目重算。
     """
 
 
@@ -123,6 +132,7 @@ def _to_response(item: RadarItem) -> RadarItemResponse:
         tags=item.tags or [],
         created_at=item.created_at,
         metrics=item.metrics or {},
+        evidence_level=evidence_level(item.source, item.metrics),
     )
 
 
