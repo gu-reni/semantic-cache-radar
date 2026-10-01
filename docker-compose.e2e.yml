@@ -3,9 +3,10 @@
 # 用途：不接真实大模型，用假上游把「客户端 → 网关 → 上游模型」整条链路跑通，
 # 并验证语义缓存的命中行为与 Token 节省。
 #
-# 与 docker-compose.yml 一起使用：
+# 与 docker-compose.yml 一起使用（令牌必须显式传，见下）：
 #   bash scripts/prepare_runtime_dirs.sh
-#   docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d
+#   E2E_GATEWAY_TOKEN=<随便一串本地值> \
+#     docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d
 #   python3 scripts/dev/e2e_cache_test.py
 #
 # 假上游放在同一个 compose 网络内，而不是跑在宿主机上：
@@ -13,7 +14,14 @@
 #   回连未放行的端口会被静默丢包（表现为超时，不是拒绝），排查成本很高。
 #   放进同一网络后走 Docker 内建 DNS，不经过宿主机防火墙，也更易搬到别的机器。
 #
-# 注意：本文件里的令牌是联调专用明文，不具备任何真实权限。
+# ⚠️ 为什么令牌不写在这里、也不给默认值：
+#   这份文件曾经把 GATEWAY_AUTH_TOKEN 写死成一个字面量。它的问题不是"这个值弱"，
+#   而是"它会覆盖掉 .env 里那个真正的令牌"—— 于是同一份编排被搬到公网机器上执行时，
+#   网关认的令牌会变成一个公开仓库里谁都能读到的常量，而且不会有任何报错。
+#   现在改成必须显式传入：没传就拒绝启动（compose 的 `:?` 语法），
+#   这样"误用"只可能是失败，不可能变成一次静默的降级。
+#
+#   注意不要把它写进 .env —— 那等于又给回了默认值，拒绝启动就失效了。
 
 services:
   fake-upstream:
@@ -33,7 +41,7 @@ services:
       LLM_BASE_URL: http://fake-upstream:9099
       LLM_MODEL: fake-model
       LLM_API_KEY: fake-key-for-local-test
-      GATEWAY_AUTH_TOKEN: e2e-token
+      GATEWAY_AUTH_TOKEN: ${E2E_GATEWAY_TOKEN:?必须显式提供 E2E_GATEWAY_TOKEN，本文件故意不设默认值}
     ports:
       - "127.0.0.1:18000:8000"
     depends_on:
@@ -42,7 +50,7 @@ services:
   radar:
     environment:
       GATEWAY_BASE_URL: http://gateway:8000
-      GATEWAY_AUTH_TOKEN: e2e-token
+      GATEWAY_AUTH_TOKEN: ${E2E_GATEWAY_TOKEN:?必须显式提供 E2E_GATEWAY_TOKEN，本文件故意不设默认值}
       RADAR_DATABASE_PATH: /app/data/radar.db
       # 联调时要可预测，关掉定时采集；采集本身用 --once 单独验证。
       RADAR_SCHEDULER_ENABLED: "false"

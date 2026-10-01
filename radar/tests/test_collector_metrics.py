@@ -9,10 +9,12 @@ import httpx
 import pytest
 
 from radar.app.collectors import (
+    BODY_LIMIT,
     GitHubTrendingCollector,
     HackerNewsCollector,
     V2EXCollector,
     _parse_count,
+    _truncate,
 )
 
 
@@ -112,6 +114,85 @@ def test_parse_count_handles_thousands_separators_and_labels() -> None:
     assert _parse_count("149,832") == 149832
     assert _parse_count("1,179 stars today") == 1179
     assert _parse_count("5 stars today") == 5
+
+
+@pytest.mark.asyncio
+async def test_v2ex_keeps_the_post_body_as_source_material() -> None:
+    """V2EX 的正文必须留下来当写摘要的素材。
+
+    标题常常只是个引子（「k20pro 有没有办法秒解 bl？」），内容在正文里。
+    只给标题时，摘要只能写成「该标题探讨…」这种复述标题的话 ——
+    不是模型不行，是没给它料。
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "id": 1071234,
+                    "title": "某话题",
+                    "url": "https://www.v2ex.com/t/1071234",
+                    "created": 1700000000,
+                    "content": "正文第一段。\n\n正文第二段，这里才是真正的信息。",
+                }
+            ],
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        items = await V2EXCollector(client, topic_limit=1).fetch()
+
+    assert items[0].summary is not None
+    assert "正文第二段" in items[0].summary
+    assert "\n" not in items[0].summary, "换行应被压平，避免撑坏提示词结构"
+
+
+@pytest.mark.asyncio
+async def test_v2ex_body_is_truncated() -> None:
+    """正文有的几千字，而下游只要一句摘要；传全文只涨成本不提质量。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "id": 1,
+                    "title": "很长的话题",
+                    "url": "https://www.v2ex.com/t/1",
+                    "created": 1700000000,
+                    "content": "甲" * 5000,
+                }
+            ],
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        items = await V2EXCollector(client, topic_limit=1).fetch()
+
+    body = items[0].summary
+    assert body is not None
+    assert len(body) <= BODY_LIMIT + 1, f"应截断到 {BODY_LIMIT} 附近，实际 {len(body)}"
+    assert body.endswith("…"), "截断要留痕，别让人以为原文就这么长"
+
+
+@pytest.mark.asyncio
+async def test_v2ex_without_body_leaves_summary_empty() -> None:
+    """没有正文就留空，不要拿标题去顶替 —— 那会让下游以为有素材。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[{"id": 1, "title": "无正文", "url": "https://www.v2ex.com/t/1", "created": 1700000000}],
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        items = await V2EXCollector(client, topic_limit=1).fetch()
+
+    assert items[0].summary is None
+
+
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_truncate_returns_none_for_empty_input(value: str | None) -> None:
+    assert _truncate(value) is None
 
 
 @pytest.mark.parametrize("value", [None, "", "no digits here"])

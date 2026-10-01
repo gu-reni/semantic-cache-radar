@@ -28,9 +28,9 @@ while not (_ROOT / "gateway").is_dir():
     _ROOT = _ROOT.parent
 sys.path.insert(0, str(_ROOT))
 
-from gateway.app.config import Settings  # noqa: E402
-from gateway.app.embeddings import EmbeddingService  # noqa: E402
-from radar.app.collectors import GitHubTrendingCollector  # noqa: E402
+from gateway.app.config import Settings
+from gateway.app.embeddings import EmbeddingService
+from radar.app.collectors import GitHubTrendingCollector
 
 PREFIXES = {"query:": "query:", "passage:": "passage:", "(无前缀)": ""}
 THRESHOLD = 0.92

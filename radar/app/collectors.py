@@ -57,6 +57,24 @@ def _metrics(**values: Any) -> dict[str, Any] | None:
     return cleaned or None
 
 
+# 正文截断长度。V2EX 的帖子正文有的几千字，而下游只是拿它写一句摘要；
+# 传全文只会把提示词撑大、拉高成本，对摘要质量没有额外帮助。
+BODY_LIMIT = 1200
+
+
+def _truncate(text: str | None) -> str | None:
+    if not text:
+        return None
+    cleaned = " ".join(text.split())
+    # 全是空白的输入要当「没有」处理，不能留下空串：
+    # 空串在布尔判断里是假的、在数据库里却是非 NULL 的值，两种语义混着用迟早出错。
+    if not cleaned:
+        return None
+    if len(cleaned) <= BODY_LIMIT:
+        return cleaned
+    return cleaned[:BODY_LIMIT] + "…"
+
+
 class HackerNewsCollector:
     """Collect recent top stories from the Hacker News Firebase API."""
 
@@ -128,6 +146,15 @@ class V2EXCollector:
                     title=str(title),
                     url=str(topic.get("url") or f"https://www.v2ex.com/t/{topic_id}"),
                     published_at=_unix_to_iso(topic.get("created")),
+                    # 正文直接放进 summary，交给下游写摘要当素材。
+                    # 这不是"摘要"，是原文 —— 但 summary 字段在下游本来就会
+                    # 被 LLM 生成的摘要覆盖，而 GitHub 采集器早就这么用了
+                    # （把仓库描述放这里）。沿用同一约定，就不用给模型加字段。
+                    #
+                    # 为什么一定要带上：V2EX 的标题常常只是个引子
+                    #（「k20pro 有没有办法秒解 bl？」），真正的内容在正文里。
+                    # 只给标题时模型只能写出「该标题探讨…」这种复述标题的摘要。
+                    summary=_truncate(topic.get("content")),
                     metrics=_metrics(
                         replies=_as_int(topic.get("replies")),
                         node=node.get("name") if isinstance(node, dict) else None,
@@ -174,9 +201,9 @@ class GitHubTrendingCollector:
                     external_id=path,
                     title=title,
                     url=f"https://github.com/{path}",
-                    summary=description_node.get_text(" ", strip=True)
-                    if description_node
-                    else None,
+                    summary=_truncate(
+                        description_node.get_text(" ", strip=True) if description_node else None
+                    ),
                     metrics=_metrics(
                         stars=_parse_count(
                             stars_node.get_text(strip=True) if stars_node else None

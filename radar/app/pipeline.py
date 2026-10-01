@@ -30,10 +30,18 @@ class GatewayEnricher:
         self._headers = {"X-Gateway-Token": auth_token} if auth_token else {}
 
     async def enrich(self, item: RadarItem) -> RadarItem:
+        material = f"标题：{item.title}"
+        if item.summary:
+            # 采集阶段抓到的原文素材（V2EX 的正文、GitHub 的仓库描述）。
+            # 之前提示词里只有标题，模型没别的可说，于是写出
+            # 「该标题探讨…」「关于 X 的技术资讯标题」这类复述标题的摘要 ——
+            # 那不是模型不行，是没给它料。
+            material += f"\n原文（节选）：{item.summary}"
         prompt = (
-            "请分析下面的技术资讯标题，只返回 JSON，不要 Markdown。"
+            "请根据下面的技术资讯，只返回 JSON，不要 Markdown。"
             '格式必须是 {"summary":"一句话摘要","tags":["标签1","标签2"]}。\n'
-            f"标题：{item.title}"
+            "摘要要说明它讲的是什么，不要复述标题；只依据给定材料，不要补充材料里没有的细节。\n"
+            f"{material}"
         )
         response = await self._client.post(
             f"{self._gateway_url}/v1/chat/completions",
