@@ -86,15 +86,21 @@ ssh "$HOST" "cd ${TARGET} && docker compose up -d --force-recreate && sleep 10 &
 # 复核：所有容器的启动时间都必须是刚刚。
 # 只看到"健康"不算数 —— 一个跑了 24 小时的旧容器也是健康的，
 # 上面那次静默失效就是从这个角度溜过去的。
+#
+# 这段循环放在本地跑，不塞进 ssh 的引号里：之前那版把 shell 循环整体
+# 塞进远端命令，引号被层层剥掉，循环拿到空输入、一声不响地什么都没打印 ——
+# 一段"看着在检查、其实没检查"的代码，比没有检查更危险。
 echo
 echo "── 复核：容器是不是真的换了 ──"
-ssh "$HOST" "cd ${TARGET} && docker compose ps --format '{{.Name}} {{.Status}}' | while read -r name status; do
-  case \"\$status\" in
-    *'Up '*[Ss]econd*|*'Up Less than a minute'*) echo \"  \$name  \$status  ✓ 刚启动\" ;;
-    *'Up '*[Mm]inute*) echo \"  \$name  \$status  ✓ 刚启动\" ;;
-    *) echo \"  \$name  \$status  ✗ 这不是刚启动的容器 —— 镜像可能没生效\" ;;
-  esac
-done"
+ssh "$HOST" "cd ${TARGET} && docker compose ps --format '{{.Name}}\t{{.Status}}'" \
+  | while IFS=$'\t' read -r name status; do
+      [ -z "$name" ] && continue
+      if printf '%s' "$status" | grep -qE 'Up ([0-9]+ (second|minute)|Less than a minute)'; then
+        printf '  %-46s %-28s ✓ 刚启动\n' "$name" "$status"
+      else
+        printf '  %-46s %-28s ✗ 不是刚启动 —— 镜像可能没生效\n' "$name" "$status"
+      fi
+    done
 
 echo
 echo "完成。下一步核验："
