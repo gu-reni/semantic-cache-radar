@@ -11,7 +11,12 @@ from gateway.app.cache_service import GeneratedAnswer, SemanticCache
 from gateway.app.config import get_settings
 from gateway.app.embeddings import EmbeddingService
 from gateway.app.llm_client import LLMClient
-from gateway.app.schemas import ChatCompletionRequest
+from gateway.app.schemas import (
+    ChatCompletionRequest,
+    EmbeddingRequest,
+    EmbeddingResponse,
+    EmbeddingVector,
+)
 from gateway.app.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
@@ -96,6 +101,35 @@ async def cache_stats(
         "total_tokens": stats.total_tokens,
         "saved_tokens": stats.saved_tokens,
     }
+
+
+@app.post("/v1/embeddings", dependencies=[Depends(require_gateway_token)])
+async def create_embeddings(
+    payload: EmbeddingRequest,
+    cache: Annotated[SemanticCache, Depends(get_semantic_cache)],
+) -> EmbeddingResponse:
+    """算向量。供雷达判断「两条标题是不是在讲同一件事」。
+
+    为什么放在网关而不是雷达里：模型只有这一份 ONNX 会话，且雷达容器的
+    内存上限只有 256m，装不下。让它走这里，既省一份内存，
+    也保证两边对同一段文本算出的是同一个向量。
+
+    为什么需要令牌：它是算力接口，敞开等于把 CPU 借出去。
+    """
+    service = cache.embedding_service
+    encoders = {
+        "symmetric": service.encode_symmetric,
+        "query": service.encode_query,
+        "passage": service.encode_passage,
+    }
+    encode = encoders[payload.input_type]
+    return EmbeddingResponse(
+        model=get_settings().embedding_model_path,
+        data=[
+            EmbeddingVector(index=index, embedding=encode(text))
+            for index, text in enumerate(payload.input)
+        ],
+    )
 
 
 @app.delete("/cache", dependencies=[Depends(require_gateway_token)])

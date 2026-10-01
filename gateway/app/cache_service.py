@@ -42,6 +42,17 @@ class CacheStats:
 class SemanticCache:
     """Coordinate embedding, vector search, TTL checks, and cache writes."""
 
+    @property
+    def embedding_service(self) -> EmbeddingService:
+        """暴露给同进程的其它接口复用。
+
+        为什么不让调用方各自新建一个 EmbeddingService：每个实例都是一份
+        独立的 ONNX 会话（模型 113MB，常驻内存数百 MB）。同一进程里再建一份
+        等于把内存翻倍，而容器是有上限的。共用同一份实例既省内存，
+        也保证金进程对同一段文本算出的是同一个向量。
+        """
+        return self._embedding_service
+
     def __init__(
         self,
         embedding_service: EmbeddingService,

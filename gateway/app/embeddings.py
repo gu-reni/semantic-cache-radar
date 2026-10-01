@@ -56,6 +56,20 @@ class EmbeddingService:
         """Embed a stored passage; e5 要求被检索侧加 passage: 前缀。"""
         return self._encode(f"passage: {text}")
 
+    SYMMETRIC_PREFIX = "query:"
+    """对称比较（两边同质，例如标题对标题）时用的前缀。
+
+    为什么单独拎出来当一个常量：e5 要求两侧加不同的前缀，
+    而「标题↔标题」既不全是查询、也不全是文档。前缀选错不会报错，
+    只会让相似度整体偏低，表现成「明明是一回事却判成不相似」。
+    这个值由 scripts/dev/check_symmetric_prefix.py 在真实数据上实测决定，
+    不是照着文档抄的。
+    """
+
+    def encode_symmetric(self, text: str) -> list[float]:
+        """Embed a piece of text for same-kind comparison (标题对标题)。"""
+        return self._encode(f"{self.SYMMETRIC_PREFIX} {text}")
+
     def _encode(self, text: str) -> list[float]:
         encoding = self._tokenizer.encode(text)
         input_ids = np.array([encoding.ids], dtype=np.int64)
