@@ -1,7 +1,8 @@
 import json
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from radar.app.models import RadarItem
 from radar.app.normalize import article_ref
@@ -27,6 +28,24 @@ _ADDED_COLUMNS: dict[str, str] = {
 
 def _now() -> str:
     return datetime.now(tz=UTC).isoformat()
+
+
+def _parse_timestamp(value: str | None) -> datetime | None:
+    """把库里两种时间格式统一解析成带时区的 datetime。
+
+    本库写入的时间是 ISO-8601（带 +00:00），而 created_at 的默认值是 SQLite 的
+    CURRENT_TIMESTAMP（`YYYY-MM-DD HH:MM:SS`，无时区）。要按「最近 N 天」过滤，
+    两种都得能解析，否则老行会被误判成「很久以前」或「在未来」。
+    """
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace(" ", "T"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed
 
 
 class RadarRepository:
@@ -90,6 +109,24 @@ class RadarRepository:
                 """
                 CREATE INDEX IF NOT EXISTS idx_radar_items_dedup_key
                 ON radar_items(dedup_key)
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS semantic_links (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    item_id INTEGER NOT NULL,
+                    other_item_id INTEGER NOT NULL,
+                    similarity REAL NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(item_id, other_item_id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_semantic_links_other
+                ON semantic_links(other_item_id)
                 """
             )
 
@@ -173,6 +210,63 @@ class RadarRepository:
             assert row is not None
             return int(row["id"])
 
+    def recent_titles(
+        self,
+        exclude_id: int,
+        limit: int,
+        days: int,
+    ) -> list[tuple[int, str]]:
+        """返回「最近 N 天、最多 limit 条」的 (id, title)，供语义归并比较。
+
+        为什么按 last_seen_at 排序：同一件事被反复采到，last_seen_at 才是它
+        「最近还在被讨论」的时间，而不是它第一次入库的 created_at。
+        """
+        cutoff = datetime.now(tz=UTC) - timedelta(days=days)
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, title, last_seen_at, created_at
+                FROM radar_items
+                WHERE id != ?
+                ORDER BY COALESCE(last_seen_at, created_at) DESC
+                LIMIT ?
+                """,
+                (exclude_id, limit),
+            ).fetchall()
+
+        result: list[tuple[int, str]] = []
+        for row in rows:
+            # 在 Python 侧过滤时间窗口：SQL 字符串比较对两种时间格式不可靠。
+            seen = _parse_timestamp(row["last_seen_at"] or row["created_at"])
+            if seen is None or seen >= cutoff:
+                result.append((int(row["id"]), str(row["title"])))
+        return result
+
+    def record_semantic_links(self, candidates: list[tuple[int, int, float]]) -> None:
+        """把「疑似同源候选」配对连同相似度写进库，供将来标定阈值。
+
+        只存相似度数值和两端的条目 id，不存向量 —— 向量会让库体积失控，
+        而标定阈值只需要「谁和谁、有多像」这两个事实。
+        同一对重复出现时覆盖更新：同一对在不同轮次算出的相似度可能因标题更新而变化。
+        """
+        if not candidates:
+            return
+        now = _now()
+        with self._connect() as connection:
+            connection.executemany(
+                """
+                INSERT INTO semantic_links (item_id, other_item_id, similarity, created_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(item_id, other_item_id) DO UPDATE SET
+                    similarity = excluded.similarity,
+                    created_at = excluded.created_at
+                """,
+                [
+                    (item_id, other_id, round(float(similarity), 6), now)
+                    for item_id, other_id, similarity in candidates
+                ],
+            )
+
     def list_items(
         self,
         limit: int = 20,
@@ -212,7 +306,7 @@ class RadarRepository:
             order_clause = "ORDER BY COALESCE(published_at, created_at) DESC"
 
         query = f"""
-            SELECT source, external_id, title, url, published_at,
+            SELECT id, source, external_id, title, url, published_at,
                    summary, tags_json, created_at, metrics_json,
                    dedup_key, first_seen_at, last_seen_at
                    {select_rank}
@@ -226,9 +320,12 @@ class RadarRepository:
             rows = connection.execute(query, parameters).fetchall()
             items = [self._row_to_item(row) for row in rows]
             corroboration = self._corroboration_for(connection, rows)
+            peer_counts = self._semantic_peer_counts(
+                connection, [int(row["id"]) for row in rows]
+            )
         return [
-            self._with_corroboration(item, corroboration)
-            for item in items
+            self._with_derived_metrics(item, row, corroboration, peer_counts)
+            for item, row in zip(items, rows, strict=True)
         ]
 
     @staticmethod
@@ -258,13 +355,30 @@ class RadarRepository:
         return grouped
 
     @staticmethod
-    def _with_corroboration(item: RadarItem, grouped: dict[str, list[str]]) -> RadarItem:
+    def _with_derived_metrics(
+        item: RadarItem,
+        row: sqlite3.Row,
+        corroboration: dict[str, list[str]],
+        peer_counts: dict[int, int],
+    ) -> RadarItem:
+        """把读取时才算得出来的派生信号并进 metrics。
+
+        两个派生信号都不落库（等级是算出来的，候选配对也只存数值）：
+          corroborating_sources —— 还有哪些源提到同一个东西（精确 dedup_key 命中）；
+          semantic_peer_count   —— 疑似同源候选数（任务 1 记下的语义配对，按条目聚合）。
+        """
+        extra: dict[str, Any] = {}
         ref = article_ref(item.url)
-        others = sorted(set(grouped.get(ref.key, [])) - {item.source})
-        if not others:
+        others = sorted(set(corroboration.get(ref.key, [])) - {item.source})
+        if others:
+            extra["corroborating_sources"] = others
+        peer_count = peer_counts.get(int(row["id"]), 0)
+        if peer_count > 0:
+            extra["semantic_peer_count"] = peer_count
+        if not extra:
             return item
         metrics = dict(item.metrics or {})
-        metrics["corroborating_sources"] = others
+        metrics.update(extra)
         return RadarItem(
             source=item.source,
             external_id=item.external_id,
@@ -276,6 +390,35 @@ class RadarRepository:
             created_at=item.created_at,
             metrics=metrics,
         )
+
+    @staticmethod
+    def _semantic_peer_counts(
+        connection: sqlite3.Connection, item_ids: list[int]
+    ) -> dict[int, int]:
+        """一次查清每个条目有多少个疑似同源候选。
+
+        配对是「新条目 -> 旧条目」的有向记录，所以聚合时要两个方向都看：
+        该条目既可能是 item_id（较新一侧），也可能是 other_item_id（较旧一侧）。
+        """
+        if not item_ids:
+            return {}
+        placeholders = ",".join("?" for _ in item_ids)
+        rows = connection.execute(
+            f"""
+            SELECT x, COUNT(DISTINCT y) AS cnt FROM (
+                SELECT item_id AS x, other_item_id AS y
+                FROM semantic_links
+                WHERE item_id IN ({placeholders})
+                UNION ALL
+                SELECT other_item_id AS x, item_id AS y
+                FROM semantic_links
+                WHERE other_item_id IN ({placeholders})
+            )
+            GROUP BY x
+            """,
+            item_ids + item_ids,
+        ).fetchall()
+        return {int(row["x"]): int(row["cnt"]) for row in rows}
 
     def count(self) -> int:
         with self._connect() as connection:

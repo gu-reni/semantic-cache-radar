@@ -1,4 +1,5 @@
 import json
+import logging
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -6,6 +7,9 @@ import httpx
 
 from radar.app.models import RadarItem
 from radar.app.repository import RadarRepository
+from radar.app.semantic import SemanticLinker
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -67,9 +71,15 @@ class GatewayEnricher:
 
 
 class RadarPipeline:
-    def __init__(self, repository: RadarRepository, enricher: GatewayEnricher) -> None:
+    def __init__(
+        self,
+        repository: RadarRepository,
+        enricher: GatewayEnricher,
+        linker: SemanticLinker | None = None,
+    ) -> None:
         self._repository = repository
         self._enricher = enricher
+        self._linker = linker
 
     async def process(self, items: list[RadarItem]) -> EnrichmentResult:
         stored = 0
@@ -77,11 +87,18 @@ class RadarPipeline:
         for item in items:
             try:
                 enriched = await self._enricher.enrich(item)
-                self._repository.upsert(enriched)
+                item_id = self._repository.upsert(enriched)
                 stored += 1
             except (httpx.HTTPError, KeyError, TypeError, ValueError, json.JSONDecodeError):
                 failed += 1
-                self._repository.upsert(item)
+                item_id = self._repository.upsert(item)
+            # 语义归并是观测性增强，失败绝不能连累条目落库：
+            # 算不出相似度就跳过，条目照常存在（与 enrich 失败时保留条目的做法一致）。
+            if self._linker is not None:
+                try:
+                    await self._linker.link(item_id, item.title)
+                except (httpx.HTTPError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+                    logger.warning("语义归并失败，跳过该条目 item_id=%s", item_id)
         return EnrichmentResult(processed=len(items), stored=stored, failed=failed)
 
 

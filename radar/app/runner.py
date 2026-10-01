@@ -14,6 +14,7 @@ from radar.app.collectors import (
 )
 from radar.app.pipeline import EnrichmentResult, GatewayEnricher, RadarPipeline
 from radar.app.repository import RadarRepository
+from radar.app.semantic import SemanticLinker
 
 logger = logging.getLogger(__name__)
 
@@ -81,9 +82,11 @@ async def run_configured_once() -> RadarRunResult:
             V2EXCollector(client, topic_limit=story_limit),
             GitHubTrendingCollector(client, repository_limit=story_limit),
         ]
+        repository = RadarRepository(database_path)
         pipeline = RadarPipeline(
-            RadarRepository(database_path),
+            repository,
             GatewayEnricher(client, gateway_url, auth_token=gateway_token),
+            SemanticLinker(client, gateway_url, repository, auth_token=gateway_token),
         )
         return await RadarRunner(collectors, pipeline).run_once()
 
