@@ -82,6 +82,7 @@ def get_semantic_cache() -> SemanticCache:
         vector_store=VectorStore(settings.vector_store_path),
         similarity_threshold=settings.cache_similarity_threshold,
         ttl_seconds=settings.cache_ttl_seconds,
+        stats_path=settings.stats_path,
     )
 
 
@@ -100,6 +101,10 @@ async def cache_stats(
         "completion_tokens": stats.completion_tokens,
         "total_tokens": stats.total_tokens,
         "saved_tokens": stats.saved_tokens,
+        # 新增：把命中按「文本完全一致 / 语义相似」分开，直接回答
+        # 「语义缓存到底有没有真的被用上」，老字段一个没少，向后兼容。
+        "exact_hits": stats.exact_hits,
+        "semantic_hits": stats.semantic_hits,
     }
 
 

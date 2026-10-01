@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     vector_store_path: str = "./data/chroma"
     cache_similarity_threshold: float = 0.92
     cache_ttl_seconds: int = 86400
+    # 统计计数器的落盘路径；重启后从这份 JSON 恢复，否则命中/未命中计数会归零，
+    # 「语义缓存到底有没有被用上」就永远只能靠读代码推理。容器内路径即可。
+    stats_path: str = "./data/cache_stats.json"
 
     model_config = SettingsConfigDict(
         env_file=".env",
