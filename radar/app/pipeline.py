@@ -1,5 +1,5 @@
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import httpx
@@ -48,15 +48,13 @@ class GatewayEnricher:
         payload = response.json()
         content = payload["choices"][0]["message"]["content"]
         enrichment = _parse_enrichment(content)
-        return RadarItem(
-            source=item.source,
-            external_id=item.external_id,
-            title=item.title,
-            url=item.url,
-            published_at=item.published_at,
+        # 用 replace 而不是把字段一个个重新拼一遍：
+        # 手拼的写法在加新字段时不会报错，只会把那个字段悄悄丢掉
+        # （metrics 就是这么差一点被丢的；已用反向验证确认这条测试守得住）。
+        return replace(
+            item,
             summary=enrichment["summary"],
             tags=enrichment["tags"],
-            created_at=item.created_at,
         )
 
 

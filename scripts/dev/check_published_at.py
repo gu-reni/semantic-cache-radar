@@ -16,7 +16,7 @@ while _root != _root.parent and not (_root / "radar" / "app").is_dir():
     _root = _root.parent
 sys.path.insert(0, str(_root))
 
-from radar.app.collectors import HackerNewsCollector  # noqa: E402
+from radar.app.collectors import HackerNewsCollector
 
 
 async def main() -> None:

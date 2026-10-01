@@ -1,4 +1,5 @@
 import asyncio
+import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -25,6 +26,35 @@ def _unix_to_iso(value: Any) -> str | None:
         return datetime.fromtimestamp(int(value), tz=UTC).isoformat()
     except (TypeError, ValueError, OSError, OverflowError):
         return None
+
+
+def _as_int(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_count(text: str | None) -> int | None:
+    """从 `149,832` 或 `1,179 stars today` 这类文案里取出数字。"""
+    if not text:
+        return None
+    match = re.search(r"[\d,]+", text)
+    if match is None:
+        return None
+    return _as_int(match.group(0).replace(",", ""))
+
+
+def _metrics(**values: Any) -> dict[str, Any] | None:
+    """丢掉取不到的值，剩下的存下来；一个都没有就返回 None。
+
+    不做默认值填充：源站没给就是没给，写 0 会把「没有这个信号」伪装成
+    「这个信号等于零」，而后者会直接影响后续的排序与评级。
+    """
+    cleaned = {key: value for key, value in values.items() if value not in (None, "")}
+    return cleaned or None
 
 
 class HackerNewsCollector:
@@ -60,6 +90,11 @@ class HackerNewsCollector:
                 title=str(title),
                 url=str(story.get("url") or f"https://news.ycombinator.com/item?id={story_id}"),
                 published_at=_unix_to_iso(story.get("time")),
+                metrics=_metrics(
+                    points=_as_int(story.get("score")),
+                    comments=_as_int(story.get("descendants")),
+                    author=story.get("by"),
+                ),
             )
 
         results = await _gather_limited(story_ids, fetch_story)
@@ -84,6 +119,8 @@ class V2EXCollector:
             title = topic.get("title")
             if topic_id is None or not title:
                 continue
+            node = topic.get("node")
+            member = topic.get("member")
             items.append(
                 RadarItem(
                     source="v2ex",
@@ -91,6 +128,12 @@ class V2EXCollector:
                     title=str(title),
                     url=str(topic.get("url") or f"https://www.v2ex.com/t/{topic_id}"),
                     published_at=_unix_to_iso(topic.get("created")),
+                    metrics=_metrics(
+                        replies=_as_int(topic.get("replies")),
+                        node=node.get("name") if isinstance(node, dict) else None,
+                        author=member.get("username") if isinstance(member, dict) else None,
+                        last_touched=_unix_to_iso(topic.get("last_touched")),
+                    ),
                 )
             )
         return items
@@ -121,6 +164,9 @@ class GitHubTrendingCollector:
             if "/" not in path:
                 continue
             description_node = article.select_one("p")
+            stars_node = article.select_one('a[href$="/stargazers"]')
+            today_node = article.select_one("span.float-sm-right")
+            language_node = article.select_one("[itemprop=programmingLanguage]")
             title = path.replace("/", " ", 1)
             items.append(
                 RadarItem(
@@ -131,6 +177,15 @@ class GitHubTrendingCollector:
                     summary=description_node.get_text(" ", strip=True)
                     if description_node
                     else None,
+                    metrics=_metrics(
+                        stars=_parse_count(
+                            stars_node.get_text(strip=True) if stars_node else None
+                        ),
+                        stars_today=_parse_count(
+                            today_node.get_text(strip=True) if today_node else None
+                        ),
+                        language=language_node.get_text(strip=True) if language_node else None,
+                    ),
                 )
             )
         return items

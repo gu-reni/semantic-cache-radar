@@ -30,7 +30,7 @@ COMPLETION_TOKENS = 18
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
-    def do_POST(self) -> None:  # noqa: N802 - http.server 的接口命名
+    def do_POST(self) -> None:
         global CALL_COUNT, TOKEN_COUNT
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length) if length else b"{}"
@@ -80,7 +80,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         """上报累计调用次数，供联调脚本对账。"""
         with LOCK:
             body = json.dumps(

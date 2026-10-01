@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Query, Request
 from fastapi.responses import FileResponse
@@ -94,6 +94,13 @@ class RadarItemResponse(BaseModel):
     summary: str | None
     tags: list[str]
     created_at: str | None
+    metrics: dict[str, Any] = {}
+    """源站原样给的量化信号（点数/评论数/星数…）。
+
+    除了 `heat_rank_in_source`（本库按源内动量算的名次）与
+    `corroborating_sources`（还有哪些源提到同一个东西）之外，
+    其余都是抓来就有的值，不做换算 —— 口径要改时不必重采历史数据。
+    """
 
 
 def _database_path() -> str:
@@ -115,6 +122,7 @@ def _to_response(item: RadarItem) -> RadarItemResponse:
         summary=item.summary,
         tags=item.tags or [],
         created_at=item.created_at,
+        metrics=item.metrics or {},
     )
 
 
@@ -129,6 +137,7 @@ async def list_radar_items(
     limit: int = Query(default=20, ge=1, le=100),
     source: str | None = Query(default=None, min_length=1),
     keyword: str | None = Query(default=None, min_length=1),
+    sort: str = Query(default="time", pattern="^(time|heat)$"),
 ) -> list[RadarItemResponse]:
-    items = repository.list_items(limit=limit, source=source, keyword=keyword)
+    items = repository.list_items(limit=limit, source=source, keyword=keyword, sort=sort)
     return [_to_response(item) for item in items]
